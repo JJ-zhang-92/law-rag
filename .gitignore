@@ -1,0 +1,21 @@
+# Generated data - download/crawl results
+law-book/
+chroma_db/
+_last_update.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts
+_extract_temp/
+law-book*.zip
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test output
+result.txt
