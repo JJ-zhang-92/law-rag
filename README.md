@@ -22,7 +22,7 @@
 ### 安装
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/law-rag.git
+git clone https://github.com/JJ-zhang-92/law-rag.git
 cd law-rag
 
 # 下载法律文本库
