@@ -45,22 +45,43 @@ ollama pull nomic-embed-text
 python index.py
 ```
 
-### 检索
+### 检索（主入口：tools/retrieve.py）
 
 ```bash
-# 命令行（输出可直接贴入 LLM prompt）
-python query.py "夫妻共同债务的认定标准"
-python query.py "劳动争议 加班费 计算基数"
+# 语义检索（默认 — 纯向量，cosine 相似度）
+python tools/retrieve.py query --collection law_regulations --persist C:\.opencode\law-rag\chroma_db "试用期最长多久"
 
-# HTTP API（先启动服务）
-python server.py &
-# 浏览器访问: http://localhost:8720?q=劳动合同 试用期
-# curl:      curl "http://localhost:8720?q=失业保险费率&format=json"
+# 自动策略选择（纯规则·<1ms·不调LLM）
+# exact(条文) / compare(对比) / enumerate(列举) / semantic(语义)
+# 例：含"民法典第577条" → 自动走 BM25+向量 混合精确查找
+python tools/retrieve.py query --collection law_regulations --persist C:\.opencode\law-rag\chroma_db "民法典第577条"
 
 # 作为 Python 模块
 from search import search
 results = search("你的法律问题", top_k=5)
 ```
+
+#### 检索策略选择器
+
+| 策略 | 触发条件 | 行为 |
+|---|---|---|
+| `exact` | 含法典名+条文号（如"劳动合同法第19条"）| BM25 粗排 top-200 → 向量精排 |
+| `compare` | 含对比关键词（区别/vs/对比/还是/或者）| 拆为两个子查询 → 分别检索 → 合并去重 |
+| `enumerate` | 含列举关键词（有哪些/哪些/列举/什么情况）| 扩大 top-k → 按法典聚类分组 |
+| `semantic` | 以上都不匹配 | 纯向量检索（当前行为·不变）|
+
+#### 增量追加新法规（不重建索引）
+
+```bash
+# 从官网爬取新法条 → 逐条切分到 docs.txt → 一行追加
+python tools/retrieve.py index --collection law_regulations --persist C:\.opencode\law-rag\chroma_db --docs-file 新法条.txt
+```
+
+### ⚠️ 隔离红线
+
+`law_regulations`（法律法条·39K 条·768维 nomic-embed）与 `patent_ref`（专利对比文件）**严格隔离**，严禁跨库交叉检索。知识产权保护法律可在 `patent_ref` 复制备份。
+
+### 命令行 / HTTP API（备用）
 
 ### 更新
 
@@ -131,10 +152,11 @@ python update.py
 
 | 文件 | 用途 |
 |------|------|
+| `tools/retrieve.py` | **主入口** — 统一检索层（chromadb+nomic-embed·4种策略选择器·增量追加·BM25回退）|
 | `index.py` | 构建 ChromaDB 向量索引 |
 | `search.py` | 检索函数（可 import） |
 | `query.py` | CLI 工具，输出可贴入 LLM prompt |
-| `server.py` | HTTP API 服务（端口 8720） |
+| `server.py` | HTTP API 服务（端口 8720·备用） |
 | `crawler.py` | 增量爬虫，从 flk.npc.gov.cn 抓新法 |
 | `update.py` | 一键更新：下载 + 爬虫 + 重建索引 |
 | `requirements.txt` | Python 依赖 |
