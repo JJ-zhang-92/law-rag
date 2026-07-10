@@ -64,57 +64,69 @@ def clean_markdown(text):
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
     text = re.sub(r"\*([^*]+)\*", r"\1", text)
+    # 去除行首的 markdown 列表符（- / *），避免其挡在 "第X条" 之前导致按条切分失败
+    text = re.sub(r"(?m)^[ \t]*[-*][ \t]+", "", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     return text.strip()
 
 
+_ART_RE = re.compile(r"(?m)^[ \t　]*(?:\*\*)?(第[一二三四五六七八九十百千万零\d]+条)(?:\*\*)?")
+_CHAP_RE = re.compile(r"(?m)^[ \t　]*(?:#{1,3}[ \t]*)?(第[一二三四五六七八九十百千万零\d]+[章编节])")
+
+
 def split_by_article(text, law_name, category):
+    """按 第X条 切分；捕获并保留条号到 article 元数据。退化时按章/段落切分。"""
     chunks = []
 
-    article_pattern = re.compile(r"(?:^|\n)(?:\*\*)?第[一二三四五六七八九十百千万\d]+条\s*(.*?)(?:\*\*)?(?:\n|$)")
-    sections = article_pattern.split(text)
-
-    if len(sections) <= 2:
-        chapter_pattern = re.compile(r"(?:^|\n)(?:#{1,3}\s*)?第[一二三四五六七八九十百千万\d]+章\s*(.*?)(?:\n|$)")
-        sections = chapter_pattern.split(text)
-
-    if len(sections) <= 2:
-        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-        if len(paragraphs) <= 1:
-            if len(text) > 100:
-                chunks.append({"content": text, "article": "全文", "law": law_name, "category": category})
+    # 1) 优先按条切分：finditer 定位每个 "第X条" 起点，切片到下一条之前
+    matches = list(_ART_RE.finditer(text))
+    if len(matches) >= 2:
+        header = text[:matches[0].start()].strip()
+        if len(header) > 30:
+            chunks.append({"content": header, "article": "序言", "law": law_name, "category": category})
+        for idx, m in enumerate(matches):
+            start = m.start()
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+            body = text[start:end].strip()
+            if len(body) > 8:
+                chunks.append({
+                    "content": body,
+                    "article": m.group(1),          # 形如 "第五百六十三条"
+                    "law": law_name,
+                    "category": category,
+                })
+        if chunks:
             return chunks
-        buffer = ""
-        for p in paragraphs:
-            if len(buffer) + len(p) < 800:
-                buffer += ("\n" if buffer else "") + p
-            else:
-                if buffer:
-                    chunks.append({"content": buffer, "article": "-", "law": law_name, "category": category})
-                buffer = p
-        if buffer:
-            chunks.append({"content": buffer, "article": "-", "law": law_name, "category": category})
+
+    # 2) 退化：按章/编/节切分
+    cmatches = list(_CHAP_RE.finditer(text))
+    if len(cmatches) >= 2:
+        for idx, m in enumerate(cmatches):
+            start = m.start()
+            end = cmatches[idx + 1].start() if idx + 1 < len(cmatches) else len(text)
+            body = text[start:end].strip()
+            if len(body) > 30:
+                chunks.append({"content": body, "article": m.group(1), "law": law_name, "category": category})
+        if chunks:
+            return chunks
+
+    # 3) 退化：按段落聚合成 ~800 字块
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if len(paragraphs) <= 1:
+        if len(text) > 100:
+            chunks.append({"content": text, "article": "全文", "law": law_name, "category": category})
         return chunks
-
-    header = sections[0].strip()
-    if header:
-        chunks.append({"content": header, "article": "序言", "law": law_name, "category": category})
-
-    i = 1
-    while i < len(sections) - 1:
-        article_header = sections[i].strip()
-        content = sections[i + 1].strip() if i + 1 < len(sections) else ""
-        full_text = article_header + "\n" + content
-        if len(full_text) > 50:
-            chunks.append({
-                "content": full_text,
-                "article": article_header[:80],
-                "law": law_name,
-                "category": category
-            })
-        i += 2
-
+    buffer = ""
+    for p in paragraphs:
+        if len(buffer) + len(p) < 800:
+            buffer += ("\n" if buffer else "") + p
+        else:
+            if buffer:
+                chunks.append({"content": buffer, "article": "-", "law": law_name, "category": category})
+            buffer = p
+    if buffer:
+        chunks.append({"content": buffer, "article": "-", "law": law_name, "category": category})
     return chunks
 
 
